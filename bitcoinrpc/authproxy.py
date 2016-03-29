@@ -1,5 +1,6 @@
 import requests
 import json
+import decimal
 from base64 import b64encode
 from requests.exceptions import ConnectionError
 import logging
@@ -32,6 +33,11 @@ class AuthServiceProxy(object):
                           'Content-type': 'application/json'
                           }
 
+    def EncodeDecimal(o):
+        if isinstance(o, decimal.Decimal):
+            return float(round(o, 8))
+        raise TypeError(repr(o) + " is not JSON serializable")
+
     def __getattr__(self, name):
         """
         Return an instance of AuthServiceProxy with an rpc_call defined.
@@ -52,9 +58,17 @@ class AuthServiceProxy(object):
                                 name)
 
     def __call__(self, *args):
+        """
+        Make a request to the rpc demon with the method name.
+        When the instance of the class is summoned like a function,
+        this method gets called.
+        """
         AuthServiceProxy.__id_count += 1
-        # log.debug("-%s-> %s %s" % (AuthServiceProxy.__id_count, self.__service_name,
-        #                          json.dumps(args, default=EncodeDecimal)))
+        log.debug("-%s-> %s %s" % (AuthServiceProxy.__id_count,
+                                   self.__rpc_call,
+                                   json.dumps(args,
+                                              default=self.EncodeDecimal)
+                                   ))
         postdata = json.dumps({'version': '1.1',
                                'method': self.__rpc_call,
                                'params': args,
@@ -62,6 +76,45 @@ class AuthServiceProxy(object):
                                },
                               default=self.EncodeDecimal
                               )
+        url = ''.join(['http://', self.__rpchost, ':', self.__rpcport])
+        try:
+            r = requests.post(url, data=postdata, headers=self.__headers)
+        except ConnectionError:
+            print 'There was a problem connecting to the RPC daemon.'
+            print 'Check the connection and connection parameters:'
+            error = 'Host: %s, Port: %s, Username: %s, Password: %s' \
+                % (self.__rpchost, self.__rpcport, self.__rpcuser,
+                   self.__rpcpasswd)
+            log.error("Error connecting to rpc demon: %s" % error)
+            print error
+            return ConnectionError
+        if r.status_code == 200:
+            log.info("Response: %s" % r.json())
+            return r.json()['result']
+        else:
+            log.error("Error! Status code: %s" % r.status_code)
+            log.error("Text: %s" % r.text)
+            log.error("Json: %s" % r.json())
+            return r.json()
+
+    def batch_(self, rpc_calls):
+        """
+        Batch RPC call.
+        Pass array of arrays: [ [ "method", params... ], ... ]
+        Returns array of results.
+        """
+        batch_data = []
+        for rpc_call in rpc_calls:
+            AuthServiceProxy.__id_count += 1
+            m = rpc_call.pop(0)
+            batch_data.append({"jsonrpc": "2.0",
+                               "method": m,
+                               "params": rpc_call,
+                               "id": AuthServiceProxy.__id_count
+                               })
+
+        postdata = json.dumps(batch_data, default=self.EncodeDecimal)
+        log.debug("--> " + postdata)
         url = ''.join(['http://', self.__rpchost, ':', self.__rpcport])
         try:
             r = requests.post(url, data=postdata, headers=self.__headers)
@@ -80,38 +133,3 @@ class AuthServiceProxy(object):
             log.error("Text: %s" % r.text)
             log.error("Json: %s" % r.json())
             return r.json()
-
-    # def batch_(self, rpc_calls):
-    #     """Batch RPC call.
-    #        Pass array of arrays: [ [ "method", params... ], ... ]
-    #        Returns array of results.
-    #     """
-    #     batch_data = []
-    #     for rpc_call in rpc_calls:
-    #         AuthServiceProxy.__id_count += 1
-    #         m = rpc_call.pop(0)
-    #         batch_data.append({"jsonrpc":"2.0", "method":m, "params":rpc_call, "id":AuthServiceProxy.__id_count})
-    #
-    #     postdata = json.dumps(batch_data, default=EncodeDecimal)
-    #     log.debug("--> "+postdata)
-    #     self.__conn.request('POST', self.__url.path, postdata,
-    #                         {'Host': self.__url.hostname,
-    #                          'User-Agent': USER_AGENT,
-    #                          'Authorization': self.__auth_header,
-    #                          'Content-type': 'application/json'})
-    #     results = []
-    #     responses = self._get_response()
-    #     for response in responses:
-    #         if response['error'] is not None:
-    #             raise JSONRPCException(response['error'])
-    #         elif 'result' not in response:
-    #             raise JSONRPCException({
-    #                 'code': -343, 'message': 'missing JSON-RPC result'})
-    #         else:
-    #             results.append(response['result'])
-    #     return results
-    #
-    # def EncodeDecimal(o):
-    #     if isinstance(o, decimal.Decimal):
-    #         return float(round(o, 8))
-    #     raise TypeError(repr(o) + " is not JSON serializable")
