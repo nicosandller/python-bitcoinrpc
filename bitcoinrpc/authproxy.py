@@ -80,47 +80,82 @@ def EncodeDecimal(o):
 class AuthServiceProxy(object):
     __id_count = 0
 
-    def __init__(self, service_url, service_name=None, timeout=HTTP_TIMEOUT, connection=None):
-        self.__service_url = service_url
-        self.__service_name = service_name
-        self.__url = urlparse.urlparse(service_url)
-        if self.__url.port is None:
-            port = 80
-        else:
-            port = self.__url.port
-        (user, passwd) = (self.__url.username, self.__url.password)
-        try:
-            user = user.encode('utf8')
-        except AttributeError:
-            pass
-        try:
-            passwd = passwd.encode('utf8')
-        except AttributeError:
-            pass
-        authpair = user + b':' + passwd
-        self.__auth_header = b'Basic ' + base64.b64encode(authpair)
+    def __init__(self,
+                 rpcuser,
+                 rpcpasswd,
+                 rpchost,
+                 rpcport,
+                 rpc_call=None,
+                #  service_url,
+                #  service_name=None,
+                #  timeout=HTTP_TIMEOUT,
+                #  connection=None
+                 ):
 
-        self.__timeout = timeout
+        self.__rpcuser = rpcuser.encode('utf-8')
+        self.__rpcpasswd = rpcpasswd.encode('utf-8')
+        self.__rpchost = rpchost
+        self.__rpcport = rpcport
+        # self.__service_url = service_url
+        self.__rpc_call = rpc_call
+        # self.__service_name = service_name
+        # self.__url = urlparse.urlparse(service_url)
+        # if self.__url.port is None:
+        #     port = 80
+        # else:
+        #     port = self.__url.port
+        # (user, passwd) = (self.__url.username, self.__url.password)
+        # try:
+        #     user = user.encode('utf8')
+        # except AttributeError:
+        #     pass
+        # try:
+        #     passwd = passwd.encode('utf8')
+        # except AttributeError:
+        #     pass
+        self.__auth_header = ' '.join(
+            ['Basic', b64encode(':'.join([self.__rpcuser, self.__rpcpasswd]))]
+        )
+        self.__headers = {'Host': self.__rpchost,
+                          'User-Agent': 'Savoir v0.1',
+                          'Authorization': self.__auth_header,
+                          'Content-type': 'application/json'
+                          }
+        # authpair = user + b':' + passwd
+        # self.__auth_header = b'Basic ' + base64.b64encode(authpair)
 
-        if connection:
-            # Callables re-use the connection of the original proxy
-            self.__conn = connection
-        elif self.__url.scheme == 'https':
-            self.__conn = httplib.HTTPSConnection(self.__url.hostname, port,
-                                                  timeout=timeout)
-        else:
-            self.__conn = httplib.HTTPConnection(self.__url.hostname, port,
-                                                 timeout=timeout)
+        # self.__timeout = timeout
+        # if connection:
+        #     # Callables re-use the connection of the original proxy
+        #     self.__conn = connection
+        # elif self.__url.scheme == 'https':
+        #     self.__conn = httplib.HTTPSConnection(self.__url.hostname, port,
+        #                                           timeout=timeout)
+        # else:
+        #     self.__conn = httplib.HTTPConnection(self.__url.hostname, port,
+        #                                          timeout=timeout)
 
     def __getattr__(self, name):
+        """
+        Return an instance of AuthServiceProxy with an rpc_call defined.
+        When the attribute (method) is not defined (i.e: instance.getinfo()),
+        then __getattr__ is called with the name (getinfo) as parámeter.
+        It then calls AuthServiceProxy as a function,
+        defining self.rpc_call to the attribute's name.
+        """
+        print 'aparecio __getattr__:'
+        print name
         if name.startswith('__') and name.endswith('__'):
             # Python internal stuff
             raise AttributeError
-        if self.__service_name is not None:
-            name = "%s.%s" % (self.__service_name, name)
+        # If there is an rpc_call
+        if self.__rpc_call is not None:
+            name = "%s.%s" % (self.__rpc_call, name)
         return AuthServiceProxy(self.__service_url, name, self.__timeout, self.__conn)
 
     def __call__(self, *args):
+        print 'aparecio __call__'
+        print args
         AuthServiceProxy.__id_count += 1
 
         log.debug("-%s-> %s %s"%(AuthServiceProxy.__id_count, self.__service_name,
@@ -143,7 +178,7 @@ class AuthServiceProxy(object):
         elif 'result' not in response:
             raise JSONRPCException({
                 'code': -343, 'message': 'missing JSON-RPC result'})
-        
+
         return response['result']
 
     def batch_(self, rpc_calls):
